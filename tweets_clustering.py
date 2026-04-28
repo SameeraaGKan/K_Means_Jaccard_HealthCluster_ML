@@ -1,5 +1,8 @@
 import re
 import random
+import requests
+import io
+import zipfile
 
 def tweet_clean(tweet_text):
     # - Remove the tweet id and timestamp
@@ -21,17 +24,33 @@ def tweet_clean(tweet_text):
     
     return words
 
-def load_dataset(file_path):
-    tweets = []
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line in f:
+def load_dataset_at_runtime():
+    # Use the slug-based URL which is generally more stable on the new UCI site
+    url = "https://archive.ics.uci.edu/static/public/438/health+news+in+twitter.zip"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    print(f"Fetching dataset from: {url}")
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status() 
+        
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            # We open the nytimes file specifically
+            with z.open('Health-Tweets/nytimeshealth.txt') as f:
+                content = f.read().decode('utf-8').splitlines()
+        
+        tweets = []
+        for line in content:
             cleaned = tweet_clean(line)
             if cleaned:
                 tweets.append(cleaned)
-    return tweets
+        return tweets
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return []
 
 def jaccard_dist(setA, setB):
-    # fulmula -> 1 - (|A intersection B| / |A union B|)
+    # formula -> 1 - (|A intersection B| / |A union B|)
     intersection = len(setA.intersection(setB))
     union = len(setA.union(setB))
     
@@ -39,7 +58,6 @@ def jaccard_dist(setA, setB):
         return 1
     
     return 1 - (intersection / union)
-
 
 def kmeans(tweets, k, max_iters = 100):
     # 1. Randomly choose k initial centroids
@@ -59,19 +77,12 @@ def kmeans(tweets, k, max_iters = 100):
         # 3. Update Step: Save old centroids to check for convergence
         prev_centroids = centroids.copy()
         
-        # Logic for updating centroids: 
-        # Find the tweet in the cluster that is "most central"
-        # (Minimizes distance to all other tweets in the same cluster)
-        # 3. Update Step: Find the "Medoid" for each cluster
         new_centroids = []
         for cluster in clusters:
             if not cluster:
-                # If a cluster is empty, keep the old centroid or pick a new random one
                 new_centroids.append(random.choice(tweets))
                 continue
             
-            # Find the tweet in the cluster that has the MINIMUM total distance 
-            # to every other tweet in that same cluster
             min_total_dist = float('inf')
             best_tweet = cluster[0]
             
@@ -83,12 +94,11 @@ def kmeans(tweets, k, max_iters = 100):
             
             new_centroids.append(best_tweet)
 
-        # Check for convergence (stop if centroids don't change)
+        # Check for convergence
         if new_centroids == centroids:
             break
         centroids = new_centroids
     return clusters, centroids
-        
 
 def calculate_sse(clusters, centroids):
     sse = 0
@@ -98,9 +108,8 @@ def calculate_sse(clusters, centroids):
             dist = jaccard_dist(tweet, centroids[i])
             sse += (dist ** 2)
     return sse
-    
 
-data = load_dataset('nytimeshealth.txt')
+data = load_dataset_at_runtime()
 # print(f"Loaded {len(data)} tweets.")
 
 k_values = [5, 10, 15, 20, 25]
@@ -110,4 +119,4 @@ for k in k_values:
     
     print(f"K: {k} | SSE: {sse}")
     for idx, cluster in enumerate(final_clusters):
-        print(f"  Cluster {idx+1}: {len(cluster)} tweets")
+        print(f"   Cluster {idx+1}: {len(cluster)} tweets")
